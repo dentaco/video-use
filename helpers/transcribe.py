@@ -114,7 +114,50 @@ def call_scribe(
 LOCAL_MODEL = os.environ.get("VIDEO_USE_WHISPER_MODEL", "mlx-community/whisper-large-v3-turbo")
 # Whisper drops disfluencies unless the prompt shows them; this nudges it verbatim so
 # filler-word cuts still work without Scribe.
-VERBATIM_PROMPT = "Umm, so, uh, I was like, you know... Hmm. Okay, so, um, let me, let me start again."
+VERBATIM_PROMPT = "Umm, uh, like, you know."
+
+
+# Whisper's stock outputs on silence — YouTube outro lines it memorised in many languages.
+STOCK_HALLUCINATIONS = (
+    "thanks for watching", "thank you for watching", "see you next time", "see you in the next",
+    "please subscribe", "subtitles by", "subtitled by", "transcribed by", "amara.org",
+    "다음 영상에서 만나요", "시청해 주셔서", "ご視聴ありがとうございました", "チャンネル登録",
+    "продолжение следует", "субтитры", "спасибо за просмотр", "редактор субтитров",
+    "谢谢观看", "字幕", "sous-titres", "untertitel",
+)
+
+
+def _is_hallucination(seg: dict) -> bool:
+    """Whisper invents text on silence / music / wind. Drop the tell-tale segments."""
+    text = (seg.get("text") or "").strip()
+    if not text:
+        return True
+    low = text.lower()
+    if any(p in low for p in STOCK_HALLUCINATIONS):
+        return True
+    # mlx-whisper reports no_speech_prob as 0, so judge by decode confidence instead.
+    # Calibrated on real footage: invented phrases on wind/music/silence ("Thank you.",
+    # "We'll see you next time.", "you") averaged <=0.52 word probability and were short;
+    # real speech averaged 0.58-0.99.
+    if seg.get("avg_logprob", 0) < -1.0:
+        return True
+    probs = [w.get("probability", 1.0) for w in seg.get("words", [])]
+    mean_p = sum(probs) / len(probs) if probs else 0.0
+    n_words = len(text.split())
+    if mean_p < 0.35 or (mean_p < 0.55 and n_words <= 4):
+        return True
+    # looping output ("I have a look, I have a look, ...") compresses far too well
+    if seg.get("compression_ratio", 0) > 2.4:
+        return True
+    # the initial prompt echoed back on a silent clip
+    words = [w for w in "".join(c if c.isalnum() else " " for c in text.lower()).split()]
+    prompt = set("".join(c if c.isalnum() else " " for c in VERBATIM_PROMPT.lower()).split())
+    if words and all(w in prompt for w in words) and len(words) >= 3:
+        return True
+    # the same token over and over (e.g. a wall of one kana)
+    if len(words) >= 6 and len(set(words)) <= 2:
+        return True
+    return False
 
 
 def call_local_whisper(audio_path: Path, language: str | None = None) -> dict:
@@ -134,10 +177,13 @@ def call_local_whisper(audio_path: Path, language: str | None = None) -> dict:
         language=language,
         initial_prompt=VERBATIM_PROMPT,
         condition_on_previous_text=False,
+        hallucination_silence_threshold=2.0,
     )
     words: list[dict] = []
     prev_end: float | None = None
     for seg in result.get("segments", []):
+        if _is_hallucination(seg):
+            continue
         for w in seg.get("words", []):
             text = (w.get("word") or "").strip()
             if not text:
@@ -151,7 +197,7 @@ def call_local_whisper(audio_path: Path, language: str | None = None) -> dict:
             prev_end = end
     return {
         "language_code": result.get("language"),
-        "text": (result.get("text") or "").strip(),
+        "text": " ".join(w["text"] for w in words if w["type"] == "word"),
         "words": words,
         "backend": f"local:{LOCAL_MODEL}",
     }
