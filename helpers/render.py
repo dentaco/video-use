@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
@@ -37,6 +38,34 @@ except Exception:
 
     def auto_grade_for_clip(video, start=0.0, duration=None, verbose=False):  # type: ignore
         return "eq=contrast=1.03:saturation=0.98", {}
+
+
+# -------- ffmpeg with zscale (HDR tone-map) ---------------------------------
+#
+# Homebrew's default `ffmpeg` ships without zimg, so the HDR chain below fails with
+# "No such filter: 'zscale'" on every iPhone clip. Prefer a build that has it:
+# $VIDEO_USE_FFMPEG_DIR, then Homebrew's keg-only `ffmpeg-full`. PATH is patched
+# for this process so every ffmpeg/ffprobe call below picks it up.
+
+
+def _has_zscale(ffmpeg: str) -> bool:
+    try:
+        out = subprocess.run([ffmpeg, "-hide_banner", "-filters"], capture_output=True, text=True).stdout
+    except OSError:
+        return False
+    return " zscale " in out
+
+
+def _ensure_zscale_ffmpeg() -> None:
+    if _has_zscale("ffmpeg"):
+        return
+    for d in (os.environ.get("VIDEO_USE_FFMPEG_DIR"), "/opt/homebrew/opt/ffmpeg-full/bin", "/usr/local/opt/ffmpeg-full/bin"):
+        if d and _has_zscale(str(Path(d) / "ffmpeg")):
+            os.environ["PATH"] = f"{d}{os.pathsep}{os.environ.get('PATH', '')}"
+            return
+
+
+_ensure_zscale_ffmpeg()
 
 
 # -------- Subtitle style (bold-overlay, proven at 1920×1080 and 1080×1920) --
@@ -254,6 +283,7 @@ def extract_segment(
     preview: bool = False,
     draft: bool = False,
     rate: str | None = None,
+    gain_db: float | None = None,
 ) -> None:
     """Extract a cut range as its own MP4 with grade + 30ms audio fades baked in.
 
@@ -275,6 +305,9 @@ def extract_segment(
 
     vf_parts: list[str] = []
     if is_hdr_source(source):
+        if not _has_zscale("ffmpeg"):
+            sys.exit("HDR source needs ffmpeg with zscale: `brew install ffmpeg-full` "
+                     "(or set VIDEO_USE_FFMPEG_DIR to a build with zimg).")
         vf_parts.append(TONEMAP_CHAIN)
     vf_parts.append(scale)
     if grade_filter:
@@ -284,6 +317,9 @@ def extract_segment(
     # 30ms audio fades at both edges (Rule 3) — prevent pops
     fade_out_start = max(0.0, duration - 0.03)
     af = f"afade=t=in:st=0:d=0.03,afade=t=out:st={fade_out_start:.3f}:d=0.03"
+    # Per-range level: "mute": true (e.g. copyrighted music in the room) or "gain_db": -6
+    if gain_db is not None:
+        af = ("volume=0," if gain_db <= -90 else f"volume={gain_db}dB,") + af
 
     if draft:
         preset, crf = "ultrafast", "28"
@@ -373,7 +409,9 @@ def extract_all_segments(
         print(f"  [{i:02d}] {src_name}  {start:7.2f}-{end:7.2f}  ({duration:5.2f}s)  {note}")
         if is_auto:
             print(f"        grade: {seg_filter or '(none)'}")
-        extract_segment(src_path, start, duration, seg_filter, out_path, preview=preview, draft=draft, rate=out_rate)
+        gain = -120.0 if r.get("mute") else r.get("gain_db")
+        extract_segment(src_path, start, duration, seg_filter, out_path, preview=preview, draft=draft,
+                        rate=out_rate, gain_db=None if gain is None else float(gain))
         seg_paths.append(out_path)
 
     return seg_paths
@@ -675,9 +713,9 @@ def build_final_composite(
     # Subtitles LAST — Rule 1
     if has_subs:
         subs_abs = str(subtitles_path.resolve()).replace(":", r"\:").replace("'", r"\'")
-        filter_parts.append(
-            f"{current}subtitles='{subs_abs}':force_style='{SUB_FORCE_STYLE}'[outv]"
-        )
+        # .ass files carry their own styles/animation (titles, pops) — don't flatten them
+        style = "" if subtitles_path.suffix.lower() == ".ass" else f":force_style='{SUB_FORCE_STYLE}'"
+        filter_parts.append(f"{current}subtitles='{subs_abs}'{style}[outv]")
         out_label = "[outv]"
     else:
         # Rename the last overlay output to [outv] for consistency
