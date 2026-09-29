@@ -1,4 +1,4 @@
-"""Transcribe a video with ElevenLabs Scribe.
+"""Transcribe a video with ElevenLabs Scribe, or free local Whisper when no key is set.
 
 Extracts mono 16kHz audio via ffmpeg, uploads to Scribe with verbatim +
 diarize + audio events + word-level timestamps, writes the full response
@@ -43,10 +43,8 @@ def load_api_key() -> str:
                 k, v = line.split("=", 1)
                 if k.strip() == "ELEVENLABS_API_KEY":
                     return v.strip().strip('"').strip("'")
-    v = os.environ.get("ELEVENLABS_API_KEY", "")
-    if not v:
-        sys.exit("ELEVENLABS_API_KEY not found in .env or environment")
-    return v
+    # No key → "" and transcribe_one falls back to free local Whisper (mlx-whisper).
+    return os.environ.get("ELEVENLABS_API_KEY", "")
 
 
 def count_audio_tracks(video_path: Path) -> int:
@@ -113,6 +111,52 @@ def call_scribe(
     return resp.json()
 
 
+LOCAL_MODEL = os.environ.get("VIDEO_USE_WHISPER_MODEL", "mlx-community/whisper-large-v3-turbo")
+# Whisper drops disfluencies unless the prompt shows them; this nudges it verbatim so
+# filler-word cuts still work without Scribe.
+VERBATIM_PROMPT = "Umm, so, uh, I was like, you know... Hmm. Okay, so, um, let me, let me start again."
+
+
+def call_local_whisper(audio_path: Path, language: str | None = None) -> dict:
+    """Free offline fallback. Returns a Scribe-shaped dict (words with type/start/end/speaker_id).
+
+    No diarization or audio events: every word is speaker_0.
+    """
+    try:
+        import mlx_whisper
+    except ImportError:
+        raise RuntimeError("no ELEVENLABS_API_KEY and mlx-whisper not installed — run `uv sync` in the video-use repo")
+
+    result = mlx_whisper.transcribe(
+        str(audio_path),
+        path_or_hf_repo=LOCAL_MODEL,
+        word_timestamps=True,
+        language=language,
+        initial_prompt=VERBATIM_PROMPT,
+        condition_on_previous_text=False,
+    )
+    words: list[dict] = []
+    prev_end: float | None = None
+    for seg in result.get("segments", []):
+        for w in seg.get("words", []):
+            text = (w.get("word") or "").strip()
+            if not text:
+                continue
+            start, end = float(w["start"]), float(w["end"])
+            if prev_end is not None:
+                words.append({"text": " ", "start": prev_end, "end": max(prev_end, start),
+                              "type": "spacing", "speaker_id": "speaker_0"})
+            words.append({"text": text, "start": start, "end": end, "type": "word",
+                          "speaker_id": "speaker_0", "logprob": w.get("probability")})
+            prev_end = end
+    return {
+        "language_code": result.get("language"),
+        "text": (result.get("text") or "").strip(),
+        "words": words,
+        "backend": f"local:{LOCAL_MODEL}",
+    }
+
+
 def transcript_path(edit_dir: Path, video: Path, audio_track: int = 0) -> Path:
     """Where a video's transcript lands.
 
@@ -173,9 +217,14 @@ def transcribe_one(
             )
 
         size_mb = audio.stat().st_size / (1024 * 1024)
-        if verbose:
-            print(f"  uploading {video.stem}.wav ({size_mb:.1f} MB)", flush=True)
-        payload = call_scribe(audio, api_key, language, num_speakers)
+        if api_key:
+            if verbose:
+                print(f"  uploading {video.stem}.wav ({size_mb:.1f} MB)", flush=True)
+            payload = call_scribe(audio, api_key, language, num_speakers)
+        else:
+            if verbose:
+                print(f"  transcribing {video.stem}.wav locally ({LOCAL_MODEL})", flush=True)
+            payload = call_local_whisper(audio, language)
 
     out_path.write_text(json.dumps(payload, indent=2))
     dt = time.time() - t0

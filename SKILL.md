@@ -59,7 +59,7 @@ The skill lives in `video-use/`. User footage lives wherever they put it. All se
 
 First-time install lives in `install.md` (clone, deps, ffmpeg, skill registration, API key). Don't re-run it every session; on cold start just verify:
 
-- `ELEVENLABS_API_KEY` resolves — either in the environment or in `.env` at the video-use repo root. If missing, ask the user to paste one and write it to `.env` (never to the user's `<videos_dir>`).
+- Transcription backend: if `ELEVENLABS_API_KEY` resolves (env or `.env` at the video-use repo root) Scribe is used; otherwise `transcribe.py` falls back to **free local Whisper** (mlx-whisper, large-v3-turbo) automatically — do NOT ask the user for a key. Local mode has no diarization (all words `speaker_0`) and no audio-event tags, and Whisper can still swallow some "um"/"uh": treat unexplained gaps ≥0.3s inside a phrase as probable fillers and check them with `timeline_view`.
 - `ffmpeg` + `ffprobe` on PATH.
 - Python deps installed (`uv sync` or `pip install -e .` inside the repo).
 - Node.js + npm available if the session needs HyperFrames or Remotion slots. HyperFrames currently requires Node.js 22+.

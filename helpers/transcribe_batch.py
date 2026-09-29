@@ -85,6 +85,10 @@ def main() -> None:
         return
 
     api_key = load_api_key()
+    if not api_key:
+        # Local Whisper already uses the whole GPU; parallel workers just thrash memory.
+        args.workers = 1
+        print("no ELEVENLABS_API_KEY — using free local Whisper (1 worker)")
 
     print(f"transcribing {len(pending)} files with {args.workers} parallel workers")
     t0 = time.time()
