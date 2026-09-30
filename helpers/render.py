@@ -324,7 +324,8 @@ def extract_segment(
     # 30ms audio fades at both edges (Rule 3) — prevent pops
     out_dur = duration / speed
     fade_out_start = max(0.0, out_dur - 0.03)
-    af = f"afade=t=in:st=0:d=0.03,afade=t=out:st={fade_out_start:.3f}:d=0.03"
+    # apad: audio is never shorter than the frame-capped video (-t trims the pad)
+    af = f"afade=t=in:st=0:d=0.03,afade=t=out:st={fade_out_start:.3f}:d=0.03,apad"
     if speed != 1.0:
         tempo, chain = speed, []
         while tempo > 2.0:
@@ -361,7 +362,9 @@ def extract_segment(
         # exact length: fps conversion can emit an extra frame or two, which drifts
         # every caption/overlay after this segment
         "-frames:v", str(max(1, round(out_dur * float(Fraction(out_rate))))), "-t", f"{out_dur:.3f}",
-        "-c:a", "aac", "-b:a", "192k", "-ar", "48000",
+        # uniform stereo: concat -c copy of mixed mono/stereo segments decodes as garbage
+        # (shared/third-party clips are often mono while iPhone clips are stereo)
+        "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2",
         "-movflags", "+faststart",
         str(out_path),
     ]
@@ -440,20 +443,36 @@ def extract_all_segments(
 
 
 def concat_segments(segment_paths: list[Path], out_path: Path, edit_dir: Path) -> None:
-    """Lossless concat via the concat demuxer. No re-encode."""
+    """Video: lossless concat demuxer (-c:v copy). Audio: decoded per segment and joined
+    sample-exact with the concat filter, each piece trimmed/padded to its segment's video
+    length, then encoded ONCE.
+
+    Why not `-c copy` for audio too: every AAC segment carries ~1024 samples of encoder
+    priming that the concat demuxer does not strip, so sync drifts ~20-30ms per cut (0.5s+
+    by the end of a 20-cut short); and mixed mono/stereo segments decode as noise.
+    """
     out_path.parent.mkdir(parents=True, exist_ok=True)
     concat_list = edit_dir / "_concat.txt"
     concat_list.write_text("".join(f"file '{p.resolve()}'\n" for p in segment_paths))
 
-    cmd = [
-        "ffmpeg", "-y",
-        "-f", "concat", "-safe", "0",
-        "-i", str(concat_list),
-        "-c", "copy",
-        "-movflags", "+faststart",
-        str(out_path),
-    ]
-    print(f"concat → {out_path.name}")
+    def vdur(p: Path) -> float:
+        out = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
+                              "stream=duration", "-of", "csv=p=0", str(p)], capture_output=True, text=True).stdout
+        return float(out.strip().strip(","))
+
+    cmd = ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(concat_list)]
+    parts = []
+    for i, p in enumerate(segment_paths):
+        cmd += ["-i", str(p)]
+        d = vdur(p)
+        parts.append(f"[{i + 1}:a]aformat=sample_rates=48000:channel_layouts=stereo,"
+                     f"apad=whole_dur={d:.6f},atrim=0:{d:.6f},asetpts=PTS-STARTPTS[a{i}]")
+    graph = ";".join(parts) + ";" + "".join(f"[a{i}]" for i in range(len(segment_paths))) + \
+        f"concat=n={len(segment_paths)}:v=0:a=1[aout]"
+    cmd += ["-filter_complex", graph, "-map", "0:v", "-map", "[aout]",
+            "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-ar", "48000",
+            "-movflags", "+faststart", str(out_path)]
+    print(f"concat → {out_path.name}  (video copy, audio sample-exact)")
     subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
     concat_list.unlink(missing_ok=True)
 
