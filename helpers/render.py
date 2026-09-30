@@ -355,6 +355,14 @@ def extract_segment(
         "-ss", f"{seg_start:.3f}",
         "-t", f"{duration:.3f}",  # input-side: trims SOURCE time, so speed ramps come out duration/speed long
         "-i", str(source),
+    ]
+    has_audio = bool(subprocess.run(
+        ["ffprobe", "-v", "error", "-select_streams", "a", "-show_entries", "stream=index",
+         "-of", "csv=p=0", str(source)], capture_output=True, text=True).stdout.strip())
+    if not has_audio:  # silent source: synthesize a silent track so every segment has audio for the concat
+        cmd += ["-f", "lavfi", "-t", f"{out_dur:.3f}", "-i", "anullsrc=r=48000:cl=stereo",
+                "-map", "0:v:0", "-map", "1:a:0"]
+    cmd += [
         "-vf", vf,
         "-af", af,
         "-c:v", "libx264", "-preset", preset, "-crf", crf,
