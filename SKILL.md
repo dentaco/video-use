@@ -321,6 +321,20 @@ Append one section per session at `<edit>/project.md`:
 
 On startup, read `project.md` if it exists and summarize the last session in one sentence before asking whether to continue.
 
+## House style — Alex (personal-brand vertical shorts)
+
+Learned 2026-09-30. The first cut ("30 hours building AI") was called *mid*: a label on every shot describing what's already on screen, a timestamp on every shot, uniform ~2s cuts, no voice, no story. The rules that fixed it:
+
+- **His voice is the spine.** Build from what he says on camera (the transcript), then B-roll between the lines. A montage with no voice only works as a ≤25s loop made for a trending sound.
+- **Text only when it adds something the picture can't:** one hook (top, 2 lines, one word/line in yellow), a location/clock at chapter starts, a payoff number, one end line that asks the viewer something ("Where did you grow up?"). Never label the action ("PRESS THE SHIRT").
+- **Hook = face + promise in the first 1.5s**, or the most unexpected image (camels on JBR). Cold-open the peak line only if its picture is strong too.
+- **Vary the rhythm:** speed-ramp routine motion 2–4× (walking, driving, leaving the flat), let speech run at 1×, punch in 1.1× on a key line.
+- **Captions:** 2–3 word UPPERCASE chunks, keywords in yellow; fix whisper mishearings per video (`FIXES`) and soft-censor swearing in the caption (`F*CKING`), never in his audio. Non-English: caption in the spoken language; a single foreign line in an EN video gets EN subtitles.
+- **Content rules:** no real-estate/property content (Deedz, off-plan, client apartments); nothing about his housing/money situation; don't invent facts on screen (years, prices, "my apartment") — only what he says or what's legible in frame.
+- Audio: speech −14 LUFS, B-roll ambience −24 LUFS, mute car music; no baked music (he adds a trending sound in-app).
+
+Pipeline lives in `~/Projects/content/iphone-edits` (`build.py` shot-list → EDL + animated .ass; `review.py` contact sheet). EDL ranges also accept `"speed": 2.0` (ramp, audio atempo'd) and `"vf": "<filter>"` (e.g. a punch-in crop); segments are frame-exact so captions never drift.
+
 ## Anti-patterns
 
 Things that consistently fail regardless of style:

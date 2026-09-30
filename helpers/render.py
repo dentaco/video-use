@@ -284,6 +284,8 @@ def extract_segment(
     draft: bool = False,
     rate: str | None = None,
     gain_db: float | None = None,
+    extra_vf: str | None = None,
+    speed: float = 1.0,
 ) -> None:
     """Extract a cut range as its own MP4 with grade + 30ms audio fades baked in.
 
@@ -312,11 +314,24 @@ def extract_segment(
     vf_parts.append(scale)
     if grade_filter:
         vf_parts.append(grade_filter)
+    # Per-range extras: "vf" (e.g. a punch-in crop) and "speed" (ramp, e.g. 2.0)
+    if extra_vf:
+        vf_parts.append(extra_vf)
+    if speed != 1.0:
+        vf_parts.append(f"setpts=PTS/{speed}")
     vf = ",".join(vf_parts)
 
     # 30ms audio fades at both edges (Rule 3) — prevent pops
-    fade_out_start = max(0.0, duration - 0.03)
+    out_dur = duration / speed
+    fade_out_start = max(0.0, out_dur - 0.03)
     af = f"afade=t=in:st=0:d=0.03,afade=t=out:st={fade_out_start:.3f}:d=0.03"
+    if speed != 1.0:
+        tempo, chain = speed, []
+        while tempo > 2.0:
+            chain.append("atempo=2.0")
+            tempo /= 2.0
+        chain.append(f"atempo={tempo:.4f}")
+        af = ",".join(chain) + "," + af
     # Per-range level: "mute": true (e.g. copyrighted music in the room) or "gain_db": -6
     if gain_db is not None:
         af = ("volume=0," if gain_db <= -90 else f"volume={gain_db}dB,") + af
@@ -337,12 +352,15 @@ def extract_segment(
     cmd = [
         "ffmpeg", "-y",
         "-ss", f"{seg_start:.3f}",
+        "-t", f"{duration:.3f}",  # input-side: trims SOURCE time, so speed ramps come out duration/speed long
         "-i", str(source),
-        "-t", f"{duration:.3f}",
         "-vf", vf,
         "-af", af,
         "-c:v", "libx264", "-preset", preset, "-crf", crf,
         "-pix_fmt", "yuv420p", "-r", out_rate,
+        # exact length: fps conversion can emit an extra frame or two, which drifts
+        # every caption/overlay after this segment
+        "-frames:v", str(max(1, round(out_dur * float(Fraction(out_rate))))), "-t", f"{out_dur:.3f}",
         "-c:a", "aac", "-b:a", "192k", "-ar", "48000",
         "-movflags", "+faststart",
         str(out_path),
@@ -411,7 +429,8 @@ def extract_all_segments(
             print(f"        grade: {seg_filter or '(none)'}")
         gain = -120.0 if r.get("mute") else r.get("gain_db")
         extract_segment(src_path, start, duration, seg_filter, out_path, preview=preview, draft=draft,
-                        rate=out_rate, gain_db=None if gain is None else float(gain))
+                        rate=out_rate, gain_db=None if gain is None else float(gain),
+                        extra_vf=r.get("vf"), speed=float(r.get("speed", 1.0)))
         seg_paths.append(out_path)
 
     return seg_paths
