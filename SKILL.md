@@ -333,6 +333,24 @@ Learned 2026-09-30. The first cut ("30 hours building AI") was called *mid*: a l
 - **Content rules:** no real-estate/property content (Deedz, off-plan, client apartments); nothing about his housing/money situation; don't invent facts on screen (years, prices, "my apartment") — only what he says or what's legible in frame.
 - Audio: speech −14 LUFS, B-roll ambience −24 LUFS, mute car music; no baked music (he adds a trending sound in-app).
 
+### Upgrade 2026-10-05 (Alex: "minimal editing, captions always, cut every 2–4s, storyline must make sense")
+
+- **A new picture every 2–4s.** Never hold one shot longer than ~4s. When his voice runs longer, keep the audio and
+  cut the *picture*: `"cover": [(at, src, in, dur[, speed])]` on a shot lays B-roll over it (an L/J cut — the voice
+  never breaks). Prefer B-roll that shows what he's saying (receipt on "5 dirhams", the crashed car on "my baby").
+- **Text on screen at all times.** Speech → captions; no speech → a `line`. Captions hold through pauses < 1.2s.
+  `build.py` prints `WARN hold …` / `WARN no text …` — fix every warning before delivering.
+- **Story first, then rhythm.** One promise per video (hook = face/number/strange image + 2-line head), each beat
+  advances it, end on a question/CTA line. Order beats by story, not by clip order. Minimal editing = no labels,
+  no effects for their own sake; the only tools are cuts, punch-ins, speed ramps on routine motion.
+- **Photos are footage:** a HEIC/JPG `src` becomes a 6s push-in clip (EXIF-rotated) — use them as 1.5–2.5s cuts.
+- **Never show client work on screen** (laptop covers): check the frame for client names/data before using it.
+- **Personal disclosures** (homeless, crash cost, family fight, money left) are his call: build them, deliver in
+  `_ASK FIRST`, never publish-ready by default.
+- Specs: `SRC_DIR = "<folder under ~/Desktop/Alex /Content>"`. Deliver finals to `~/Desktop/Alex /Content/Video Bank <date>/`.
+- Companion skills installed 2026-10-05: `social-short-production` (hook/promise contract, safe zones, QA),
+  `editing-montage` (shot function, rhythm, J/L cuts), `captions-media-accessibility` (caption QA).
+
 Pipeline lives in `~/Projects/content/iphone-edits` (`build.py` shot-list → EDL + animated .ass; `review.py` contact sheet). EDL ranges also accept `"speed": 2.0` (ramp, audio atempo'd) and `"vf": "<filter>"` (e.g. a punch-in crop); segments are frame-exact so captions never drift.
 
 ## Anti-patterns

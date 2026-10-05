@@ -362,6 +362,8 @@ def extract_segment(
     if not has_audio:  # silent source: synthesize a silent track so every segment has audio for the concat
         cmd += ["-f", "lavfi", "-t", f"{out_dur:.3f}", "-i", "anullsrc=r=48000:cl=stereo",
                 "-map", "0:v:0", "-map", "1:a:0"]
+    else:  # first audio track only: newer iPhones add an undecodable spatial track (apple_apac) ffmpeg would pick
+        cmd += ["-map", "0:v:0", "-map", "0:a:0"]
     cmd += [
         "-vf", vf,
         "-af", af,
