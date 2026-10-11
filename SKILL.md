@@ -351,6 +351,22 @@ Learned 2026-09-30. The first cut ("30 hours building AI") was called *mid*: a l
 - Companion skills installed 2026-10-05: `social-short-production` (hook/promise contract, safe zones, QA),
   `editing-montage` (shot function, rhythm, J/L cuts), `captions-media-accessibility` (caption QA).
 
+### LONG-TAKE style 2026-10-05 v2 (Alex: "you cut too early for the plot to be understood — one whole clip of me talking is fine, just cut the dead space")
+
+This is now the DEFAULT for anything where he talks. The 2–4s-cut montage style is opt-in only.
+- Spec: `STYLE = "talk"`, `TITLE = "two short\nlines"`, shots `{"src", "in", "out", "talk": True, "drop": [(a, b)]}`.
+- `talk` shots keep everything from first to last word; only silences ≥ `GAP` (0.6s) are removed, detected from the
+  AUDIO (whisper stretches words over pauses, so word gaps miss dead air). Each cut leaves 0.12s/0.2s air; jump cuts
+  alternate a 1.08 punch-in. One gain per take. `drop` removes retakes/mumbles. Pick the clean take, start after "let's try again".
+- Text: one boxed title for the whole video (Avenir Next Heavy, black on white, top); sentence-case subtitles
+  (Avenir Next Demi Bold 78, bottom third), keywords yellow, swearing soft-censored automatically. Subtitle text is
+  polished by `claude -p` (casing/punctuation/mishearings, cached in edit/polish/) — FIXES still apply after.
+- No B-roll, no speed ramps, no hooks-as-labels. Order clips by story (usually creation time). Multi-clip = still whole takes.
+- Batch: `render_longtakes.sh` renders every `videos/lt*.py`.
+- No-talk montages get the same idea via `videos/_slow.py`: `SHOTS = slow(load_old("<old spec>").SHOTS, SRC_DIR)` —
+  same-clip pieces merged into one take, 1x speed, 3–6.5s per moment, old chapter heads become lines. Specs `sl*.py`,
+  batch `render_slow.sh`. Never use IMG_6159 (laptop shows a password + Deedz data).
+
 Pipeline lives in `~/Projects/content/iphone-edits` (`build.py` shot-list → EDL + animated .ass; `review.py` contact sheet). EDL ranges also accept `"speed": 2.0` (ramp, audio atempo'd) and `"vf": "<filter>"` (e.g. a punch-in crop); segments are frame-exact so captions never drift.
 
 ## Anti-patterns
